@@ -1,3 +1,4 @@
+ASSIGNMENT_URL="https://www.sydney.edu.au/units/INFO1112/2026-S2C-ND-CC"
 
 get_ip(){
   ifconfig 2>/dev/null |
@@ -28,9 +29,25 @@ IP=$(get_ip)
 PORT=$(get_port)
 # Landing message
 echo "The server is running at $IP, port=$PORT"
-echo "Listening on $IP $PORT"
 
-# check for incoming connections
 while true; do
-  nc -l -p "$PORT" -v
+  # Wait for a client's request
+  request=$(nc -l -p "$PORT" -v)
+  nc_status=$?
+
+  if [ "$nc_status" -ne 0 ]; then
+    echo "Error: Failed to received client request"
+    continue
+  fi
+
+  if [ "$request" = "assignment" ]; then
+    curl -fsSL "$ASSIGNMENT_URL" | html2text
+
+  elif [ -z "$request" ]; then
+    echo "Error: Empty request received"
+
+  else
+    echo "Error: Invalid request '$request'."
+  fi
+
 done
