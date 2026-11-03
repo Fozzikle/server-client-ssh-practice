@@ -23,5 +23,4 @@ get_port(){
   }'
 }
 
-get_ip
-get_port
+echo "The server is running at $(get_ip), port=$(get_port)"
