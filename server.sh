@@ -1,4 +1,5 @@
 #!/bin/bash
+set -o pipefail
 
 ASSIGNMENT_URL="https://www.sydney.edu.au/units/INFO1112/2026-S2C-ND-CC"
 
@@ -79,10 +80,12 @@ while true; do
 
     # Remove a possible carriage return
     request=${request%$'\r'}
+    echo "Received request: $request" # debug message
 
     if [ "$request" = "assignment" ]; then
 
         # Download webpage and convert HTML to text
+        echo "Downloading webpage..." # debug message
         if ! curl -fsSL "$ASSIGNMENT_URL" | html2text > "$PAGE_FILE"; then
             echo "Error: Failed to download or convert webpage."
 
@@ -92,6 +95,7 @@ while true; do
             wait "$NC_PID" 2>/dev/null
             continue
         fi
+
 
         if [ ! -s "$PAGE_FILE" ]; then
             echo "Error: Downloaded webpage is empty."
@@ -104,6 +108,7 @@ while true; do
         fi
 
         # Extract the assignment information and create JSON
+        echo "Extracting assignment information..."
         if ! awk -v json_file="$JSON_FILE" '
 
             # Remove leading and trailing whitespace
@@ -292,10 +297,24 @@ while true; do
             continue
         fi
 
-        # Send the JSON contents over the existing connection
-        cat "$JSON_FILE" >&"$NC_IN"
+        echo "Checking JSON file..."
 
-        # Close the server's output side so the client receives EOF
+        if [ ! -s "$JSON_FILE" ]; then
+            echo "Error: JSON file is empty."
+        else
+            echo "JSON file contents:"
+            cat "$JSON_FILE"
+
+            echo "Sending JSON to client..."
+
+            if cat "$JSON_FILE" >&"$NC_IN"; then
+                echo "JSON sent successfully."
+            else
+                echo "Error: Failed to send JSON."
+            fi
+        fi
+
+        # Close the server's output side
         exec {NC_IN}>&-
 
     elif [ -z "$request" ]; then
@@ -315,5 +334,6 @@ while true; do
     # Close the remaining connection descriptor and wait for Netcat
     exec {NC_OUT}<&-
     wait "$NC_PID" 2>/dev/null
+    echo "Client connection closed."
 
 done

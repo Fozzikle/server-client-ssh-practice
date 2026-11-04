@@ -1,12 +1,12 @@
 #!/bin/bash
 
 # assumption of same container IP/port
-SERVER_IP="172.17.0.2"
+SERVER_IP="LocalHost"
 SERVER_PORT="1234"
 
-printf 'assignment\n' | nc -N "$SERVER_IP" "$SERVER_PORT" > assignment.json
+printf 'assignment\n' | nc "$SERVER_IP" "$SERVER_PORT" > assignment.json
 
-if [ -s assignment.json ]; then
+if [ $? -eq 0 ] && [ -s assignment.json ]; then
     echo "Assignment information received successfully."
     cat assignment.json
 else
