@@ -1,5 +1,6 @@
 #!/bin/bash
 set -o pipefail
+#test
 
 ASSIGNMENT_URL="https://www.sydney.edu.au/units/INFO1112/2026-S2C-ND-CC"
 
