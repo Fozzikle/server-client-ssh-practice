@@ -59,15 +59,13 @@ echo "The server is running at $IP, port=$PORT"
 
 while true; do
 
-    # Start Netcat as a coprocess.
-    # This gives the script:
+    # Start Netcat as a coprocess
     #   NC[0] = input received from the client
     #   NC[1] = output sent to the client
     coproc NC { nc -l -p "$PORT" -v; }
 
     NC_OUT=${NC[0]}
     NC_IN=${NC[1]}
-    NC_PID=$NC_PID
 
     # Read the client's request
     if ! IFS= read -r -u "$NC_OUT" request; then
@@ -297,7 +295,7 @@ while true; do
         # Send the JSON contents over the existing connection
         cat "$JSON_FILE" >&"$NC_IN"
 
-        # Close the server's output side so the client receives EOF 
+        # Close the server's output side so the client receives EOF
         exec {NC_IN}>&-
 
     elif [ -z "$request" ]; then
