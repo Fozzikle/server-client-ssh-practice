@@ -297,7 +297,7 @@ while true; do
         # Send the JSON contents over the existing connection
         cat "$JSON_FILE" >&"$NC_IN"
 
-        # Close the server's output side so the client receives EOF
+        # Close the server's output side so the client receives EOF 
         exec {NC_IN}>&-
 
     elif [ -z "$request" ]; then
