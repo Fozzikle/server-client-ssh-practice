@@ -1,12 +1,18 @@
 #!/bin/bash
 set -o pipefail
-#test
 
 ASSIGNMENT_URL="https://www.sydney.edu.au/units/INFO1112/2026-S2C-ND-CC"
+POPULATION_URL="https://dbr.abs.gov.au/processedData/csv/STE_1.csv"
+
 
 # Temporary files stored inside the container
 PAGE_FILE="/tmp/assignment_page.txt"
 JSON_FILE="/tmp/assignment.json"
+POPULATION_FILE="/tmp/nsw_population.csv"
+
+POPULATION_DATA="/tmp/population_data.txt"
+PLOT_FILE="/tmp/population.png"
+PLOT_SCRIPT="/tmp/plot_population.py"
 
 get_ip() {
     ifconfig 2>/dev/null |
@@ -50,28 +56,72 @@ if [ -z "$IP" ]; then
 fi
 
 PORT=$(get_port "$IP")
-
+PORT=1234
 
 if [ -z "$PORT" ]; then
     echo "Error: Could not determine listening port."
     exit 1
 fi
 
+
+# Create Python plotting script.
+cat > "$PLOT_SCRIPT" <<'PY'
+import sys
+import matplotlib
+
+matplotlib.use("Agg")
+
+import matplotlib.pyplot as plt
+
+# AI acknowledgement:
+# This plotting script was generated with assistance from
+# ChatGPT (GPT-6). It reads the year/population data extracted
+# by the Bash server and generates a line plot.
+
+data_file = sys.argv[1]
+output_file = sys.argv[2]
+
+years = []
+populations = []
+
+try:
+    with open(data_file, "r") as file:
+        for line in file:
+            year, population = line.strip().split()
+            years.append(int(year))
+            populations.append(int(population))
+
+    if not years:
+        raise ValueError("No population data available.")
+
+    plt.figure(figsize=(10, 6))
+    plt.plot(years, populations, marker="o")
+
+    plt.title("Estimated Resident Population of NSW")
+    plt.xlabel("Year")
+    plt.ylabel("Population")
+
+    plt.grid(True)
+    plt.xticks(years, rotation=45)
+    plt.tight_layout()
+
+    plt.savefig(output_file)
+    plt.close()
+
+except Exception as error:
+    print("Plotting error:", error, file=sys.stderr)
+    sys.exit(1)
+PY
+
 echo "The server is running at $IP, port=$PORT"
 
 while true; do
-
-    echo "Waiting for client connection..."
 
     # Start Netcat as a coprocess
     coproc NC { nc -l -p "$PORT" -v; }
 
     NC_OUT=${NC[0]}
     NC_IN=${NC[1]}
-
-    echo "Netcat PID: $NC_PID"
-    echo "Output FD: $NC_OUT"
-    echo "Input FD: $NC_IN"
 
     # Read the client's request
     if ! IFS= read -r -t 30 -u "$NC_OUT" request; then
@@ -86,13 +136,9 @@ while true; do
     # Remove a possible carriage return
     request=${request%$'\r'}
 
-    echo "Received request: '$request'"
-
     if [ "$request" = "assignment" ]; then
 
         # Download webpage and convert HTML to text
-        echo "Downloading webpage..."
-
         if ! curl -fsSL "$ASSIGNMENT_URL" | html2text > "$PAGE_FILE"; then
             echo "Error: Failed to download or convert webpage."
             printf 'Error: Failed to retrieve assignment information.\n' >&"$NC_IN" 2>/dev/null || true
@@ -115,8 +161,6 @@ while true; do
 
         # Remove any JSON left over from a previous request
         rm -f "$JSON_FILE"
-
-        echo "Extracting assignment information..."
 
         if ! awk -v json_file="$JSON_FILE" '
 
@@ -208,6 +252,9 @@ while true; do
                     if (finished)
                         next
 
+                    # Display relevant webpage content in the terminal
+                    print line
+
                     # Extract the task description
                     if (line ~ /Programming task/) {
                         topic = "Programming task"
@@ -295,21 +342,11 @@ while true; do
             continue
         fi
 
-        echo "Checking JSON file..."
-        echo "JSON file contents:"
-        cat "$JSON_FILE"
-
-        echo "Sending JSON to client..."
-
-        echo "Checking Netcat process..."
-
         if kill -0 "$NC_PID" 2>/dev/null; then
             echo "Netcat process is still running."
         else
             echo "ERROR: Netcat process has exited."
         fi
-
-        echo "Checking server input descriptor..."
 
         if ! : >&"$NC_IN" 2>/dev/null; then
             echo "ERROR: Server input descriptor $NC_IN is closed."
@@ -326,11 +363,151 @@ while true; do
         # Close the server's input descriptor
         exec {NC_IN}>&-
 
+    elif [ "$request" = "population" ]; then
+
+        echo "Downloading NSW population data..."
+
+        # Download CSV.
+        if ! curl -fsSL "$POPULATION_URL" -o "$POPULATION_FILE"; then
+            echo "Error: Failed to download population data."
+            printf 'Error: Failed to download population data.\n' >&"$NC_IN" 2>/dev/null || true
+
+        elif [ ! -s "$POPULATION_FILE" ]; then
+            echo "Error: Population CSV is empty."
+            printf 'Error: Population CSV is empty.\n' >&"$NC_IN" 2>/dev/null || true
+
+        else
+
+            echo "Extracting NSW population data..."
+
+            # Extract years and population values using Bash.
+            : > "$POPULATION_DATA"
+
+            declare -a headers=()
+            declare -a fields=()
+            declare -a year_indices=()
+            declare -a years=()
+
+            # Read the CSV header.
+            IFS=, read -r -a headers < "$POPULATION_FILE"
+
+            # Find the columns containing years.
+            for ((i=0; i<${#headers[@]}; i++)); do
+                header=${headers[i]//$'\r'/}
+
+                if [[ "$header" =~ ^[0-9]{4}$ ]]; then
+                    year_indices+=("$i")
+                    years+=("$header")
+                fi
+            done
+
+            found=0
+            latest_population=""
+
+            # Find the estimated resident population row.
+            while IFS=, read -r -a fields; do
+
+                measure=${fields[0]//$'\r'/}
+
+                if [ "$measure" = "ERP_P_20" ]; then
+
+                    found=1
+
+                    # Extract each year and its corresponding population.
+                    for ((i=0; i<${#year_indices[@]}; i++)); do
+
+                        index=${year_indices[i]}
+                        year=${years[i]}
+                        value=${fields[index]//$'\r'/}
+
+                        # Accept only non-empty values containing digits.
+                        case "$value" in
+                            ''|*[!0-9]*)
+                                continue
+                                ;;
+                        esac
+
+                        printf '%s %s\n' "$year" "$value" >> "$POPULATION_DATA"
+
+                        if [ "$year" = "2025" ]; then
+                            latest_population="$value"
+                        fi
+
+                    done
+
+                    break
+                fi
+
+            done < <(tail -n +2 "$POPULATION_FILE")
+
+            # Check that the expected data was found.
+            if [ "$found" -ne 1 ] || [ -z "$latest_population" ]; then
+
+                echo "Error: Could not extract NSW population data."
+                printf 'Error: Could not extract NSW population data.\n' >&"$NC_IN" 2>/dev/null || true
+
+            elif [ ! -s "$POPULATION_DATA" ]; then
+
+                echo "Error: No valid population data was extracted."
+                printf 'Error: No valid population data was extracted.\n' >&"$NC_IN" 2>/dev/null || true
+
+            else
+
+                echo "NSW population in 2025: $latest_population"
+
+                echo "Generating population plot..."
+
+                # Check Python and Matplotlib availability.
+                if ! command -v python3 >/dev/null 2>&1; then
+
+                    echo "Error: Python 3 is not installed."
+                    printf 'Error: Python 3 is not installed.\n' >&"$NC_IN" 2>/dev/null || true
+
+                elif ! python3 -c "import matplotlib" 2>/dev/null; then
+
+                    echo "Error: Matplotlib is not installed."
+                    printf 'Error: Matplotlib is not installed.\n' >&"$NC_IN" 2>/dev/null || true
+
+                # Generate the PNG.
+                elif ! python3 "$PLOT_SCRIPT" "$POPULATION_DATA" "$PLOT_FILE"; then
+
+                    echo "Error: Failed to generate population plot."
+                    printf 'Error: Failed to generate population plot.\n' >&"$NC_IN" 2>/dev/null || true
+
+                elif [ ! -s "$PLOT_FILE" ]; then
+
+                    echo "Error: Population plot was not created."
+                    printf 'Error: Population plot was not created.\n' >&"$NC_IN" 2>/dev/null || true
+
+                else
+
+                    echo "Population plot generated successfully."
+                    echo "Sending population data and plot to client..."
+
+                    # Send the population value first.
+                    printf 'NSW_POPULATION=%s\n' "$latest_population" >&"$NC_IN"
+
+                    # Send the PNG as binary data.
+                    if cat "$PLOT_FILE" >&"$NC_IN"; then
+                        echo "Population plot sent successfully."
+                    else
+                        echo "Error: Failed to send population plot."
+                    fi
+
+                fi
+            fi
+        fi
+
+        # Close the server's input descriptor.
+        exec {NC_IN}>&-
+
     elif [ -z "$request" ]; then
 
         echo "Error: Empty request received."
         printf 'Error: Empty request received.\n' >&"$NC_IN" 2>/dev/null || true
         exec {NC_IN}>&-
+
+
 
     else
 
@@ -340,10 +517,9 @@ while true; do
 
     fi
 
+
     # Close remaining descriptor and wait for Netcat
     exec {NC_OUT}<&-
     wait "$NC_PID" 2>/dev/null
-
-    echo "Client connection closed."
 
 done
