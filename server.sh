@@ -51,6 +51,7 @@ fi
 
 PORT=$(get_port "$IP")
 
+
 if [ -z "$PORT" ]; then
     echo "Error: Could not determine listening port."
     exit 1
@@ -223,8 +224,10 @@ while true; do
                     }
 
                     # Extract weighting
-                    if (line ~ /15%/)
-                        points = "15%"
+                    if (match(line, /[0-9]+%/)) {
+                        points = substr(line, RSTART, RLENGTH)
+                        sub(/%$/, "", points)
+                    }
 
                     # Extract due date
                     if (line ~ /Due date:/) {
