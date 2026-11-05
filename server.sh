@@ -1,9 +1,14 @@
 #!/bin/bash
 set -o pipefail
 
+if ! command -v jq >/dev/null 2>&1; then
+    echo "Error: jq is not installed."
+    exit 1
+fi
+
 ASSIGNMENT_URL="https://www.sydney.edu.au/units/INFO1112/2026-S2C-ND-CC"
 POPULATION_URL="https://dbr.abs.gov.au/processedData/csv/STE_1.csv"
-
+POI_URL="https://maps.six.nsw.gov.au/arcgis/rest/services/public/NSW_POI/MapServer/0/query"
 
 # Temporary files stored inside the container
 PAGE_FILE="/tmp/assignment_page.txt"
@@ -13,6 +18,11 @@ POPULATION_FILE="/tmp/nsw_population.csv"
 POPULATION_DATA="/tmp/population_data.txt"
 PLOT_FILE="/tmp/population.png"
 PLOT_SCRIPT="/tmp/plot_population.py"
+
+POI_NAMES_FILE="/tmp/poi_names.json"
+POI_LOOKUP_FILE="/tmp/poi_lookup.json"
+POI_RESULTS_FILE="/tmp/poi_results.json"
+POI_RESPONSE_FILE="/tmp/poi_response.json"
 
 get_ip() {
     ifconfig 2>/dev/null |
@@ -112,6 +122,344 @@ except Exception as error:
     print("Plotting error:", error, file=sys.stderr)
     sys.exit(1)
 PY
+
+
+# Find the coordinates of a POI using its name.
+lookup_poi_coordinates() {
+
+    local poi_name="$1"
+    local search_name
+    local escaped_name
+    local where_clause
+
+    search_name=${poi_name^^}
+
+    # Escape apostrophes for the SQL query.
+    escaped_name=$(printf '%s' "$search_name" | sed "s/'/''/g")
+
+    where_clause="poiname LIKE '%${escaped_name}%'"
+
+    echo "Looking up POI: $poi_name"
+
+    if ! curl -fsSG "$POI_URL" \
+        -o "$POI_LOOKUP_FILE" \
+        --data-urlencode "where=$where_clause" \
+        --data-urlencode "outFields=poiname" \
+        --data-urlencode "returnGeometry=true" \
+        --data-urlencode "f=pjson"; then
+
+        echo "Error: Failed to contact the NSW POI API."
+        return 1
+    fi
+
+    # Check for an API error.
+    if jq -e '.error' "$POI_LOOKUP_FILE" >/dev/null 2>&1; then
+        echo "Error: The POI API returned an error."
+        return 1
+    fi
+
+    # Select an exact name match, ignoring capitalisation.
+    latitude=$(jq -r --arg name "$search_name" '
+        [.features[] |
+        select((.attributes.poiname // "" | ascii_upcase) == $name)][0]
+        .geometry.y // empty
+    ' "$POI_LOOKUP_FILE")
+
+    longitude=$(jq -r --arg name "$search_name" '
+        [.features[] |
+        select((.attributes.poiname // "" | ascii_upcase) == $name)][0]
+        .geometry.x // empty
+    ' "$POI_LOOKUP_FILE")
+
+    if [ -z "$latitude" ] || [ -z "$longitude" ]; then
+        echo "Error: Could not find an exact matching POI."
+        return 1
+    fi
+
+    echo "POI coordinates found: $latitude, $longitude"
+
+    return 0
+}
+
+
+# Retrieve nearby POIs and construct the final JSON response.
+get_nearby_pois() {
+
+    local poi_name="$1"
+    local latitude="$2"
+    local longitude="$3"
+    local distance="$4"
+
+    local where_clause
+    local escaped_name
+    local geometry
+
+    # Exclude the original POI when the request uses a name.
+    if [ "$poi_name" != "Coordinates" ]; then
+
+        escaped_name=$(printf '%s' "${poi_name^^}" | sed "s/'/''/g")
+
+        where_clause="poiname IS NOT NULL AND poiname <> '$escaped_name'"
+
+    else
+        where_clause="poiname IS NOT NULL"
+    fi
+
+    # Construct the point geometry.
+    geometry=$(jq -cn \
+        --argjson lon "$longitude" \
+        --argjson lat "$latitude" \
+        '{x: $lon, y: $lat, spatialReference: {wkid: 4283}}')
+
+    echo "Searching within $distance metres..."
+
+    # Query the NSW POI API using the supplied coordinates and distance.
+    if ! curl -fsSG "$POI_URL" \
+        -o "$POI_RESULTS_FILE" \
+        --data-urlencode "where=$where_clause" \
+        --data-urlencode "geometry=$geometry" \
+        --data-urlencode "geometryType=esriGeometryPoint" \
+        --data-urlencode "inSR=4283" \
+        --data-urlencode "spatialRel=esriSpatialRelIntersects" \
+        --data-urlencode "distance=$distance" \
+        --data-urlencode "units=esriSRUnit_Meter" \
+        --data-urlencode "outFields=poiname" \
+        --data-urlencode "returnGeometry=false" \
+        --data-urlencode "f=pjson"; then
+
+        echo "Error: Failed to retrieve nearby POIs."
+        return 1
+    fi
+
+    # Check for API errors or an invalid response.
+    if ! jq -e '.features | type == "array"' "$POI_RESULTS_FILE" >/dev/null 2>&1; then
+        echo "Error: Invalid response received from the POI API."
+        return 1
+    fi
+
+    if jq -e '.error' "$POI_RESULTS_FILE" >/dev/null 2>&1; then
+        echo "Error: The POI API returned an error."
+        return 1
+    fi
+
+    # Extract names, remove null values and duplicates.
+    if ! jq --arg original "${poi_name^^}" '
+        [.features[].attributes.poiname |
+        select(. != null and . != "" and
+        (ascii_upcase != $original))]
+        | unique
+    ' "$POI_RESULTS_FILE" > "$POI_NAMES_FILE"; then
+
+        echo "Error: Failed to extract nearby POI names."
+        return 1
+    fi
+
+    # Construct the final JSON response.
+    if ! jq -n \
+        --arg poi "$poi_name" \
+        --argjson latitude "$latitude" \
+        --argjson longitude "$longitude" \
+        --argjson distance "$distance" \
+        --slurpfile neighbours "$POI_NAMES_FILE" \
+        '{
+            poi: $poi,
+            coordinates: {
+                latitude: $latitude,
+                longitude: $longitude
+            },
+            distance: $distance,
+            neighbours: $neighbours[0]
+        }' > "$POI_RESPONSE_FILE"; then
+
+        echo "Error: Failed to construct POI JSON response."
+        return 1
+    fi
+
+    echo "Found $(jq '.neighbours | length' "$POI_RESPONSE_FILE") nearby POIs."
+
+    return 0
+}
+# Process POI requests.
+process_poi_request() {
+
+    local request="$1"
+    local poi_name=""
+    local latitude=""
+    local longitude=""
+    local distance=""
+    local sql_name=""
+    local geometry=""
+    local where_clause=""
+    local lookup_count=""
+
+    # Clear any response from a previous request.
+    rm -f "$POI_RESPONSE_FILE"
+
+    # Identify whether the request uses a POI name or coordinates.
+    if [[ "$request" =~ ^poi[[:space:]]+name=\"([^\"]+)\"[[:space:]]+distance=([0-9]+)$ ]]; then
+
+        poi_name="${BASH_REMATCH[1]}"
+        distance="${BASH_REMATCH[2]}"
+
+        echo "POI search by name: $poi_name"
+
+        # Convert the name to uppercase, matching the API's stored names.
+        # Escape apostrophes for the ArcGIS SQL query.
+        sql_name="${poi_name^^}"
+        sql_name="${sql_name//\'/\'\'}"
+
+        # Look up the POI and retrieve its coordinates.
+        if ! curl -fsSG "$POI_URL" \
+            --data-urlencode "where=poiname LIKE '%$sql_name%'" \
+            --data-urlencode "outFields=poiname" \
+            --data-urlencode "returnGeometry=true" \
+            --data-urlencode "outSR=4283" \
+            --data-urlencode "f=json" \
+            -o "$POI_LOOKUP_FILE"; then
+
+            echo "Error: Failed to connect to the NSW POI API."
+            jq -n '{error: "Failed to connect to the NSW POI API."}' > "$POI_RESPONSE_FILE"
+            return 1
+        fi
+
+        # Check whether the API returned a valid response.
+        if ! jq -e 'has("error") == false and (.features | type == "array")' \
+            "$POI_LOOKUP_FILE" >/dev/null 2>&1; then
+
+            echo "Error: Invalid response from POI API."
+            jq -n '{error: "Invalid response from POI API."}' > "$POI_RESPONSE_FILE"
+            return 1
+        fi
+
+        lookup_count=$(jq '.features | length' "$POI_LOOKUP_FILE")
+
+        if [ "$lookup_count" -eq 0 ]; then
+            echo "Error: POI not found."
+            jq -n --arg name "$poi_name" \
+                '{error: ("POI not found: " + $name)}' > "$POI_RESPONSE_FILE"
+            return 1
+        fi
+
+        # Use the first matching POI.
+        poi_name=$(jq -r '.features[0].attributes.poiname // empty' "$POI_LOOKUP_FILE")
+        longitude=$(jq -r '.features[0].geometry.x // empty' "$POI_LOOKUP_FILE")
+        latitude=$(jq -r '.features[0].geometry.y // empty' "$POI_LOOKUP_FILE")
+
+        if [ -z "$latitude" ] || [ -z "$longitude" ] || [ -z "$poi_name" ]; then
+            echo "Error: Could not retrieve POI coordinates."
+            jq -n '{error: "Could not retrieve POI coordinates."}' > "$POI_RESPONSE_FILE"
+            return 1
+        fi
+
+        # Exclude the original POI from the nearby results.
+        sql_name="${poi_name//\'/\'\'}"
+        where_clause="poiname IS NOT NULL AND poiname <> '$sql_name'"
+
+    elif [[ "$request" =~ ^poi[[:space:]]+lat=(-?[0-9]+([.][0-9]+)?)[[:space:]]+lon=(-?[0-9]+([.][0-9]+)?)[[:space:]]+distance=([0-9]+)$ ]]; then
+
+        latitude="${BASH_REMATCH[1]}"
+        longitude="${BASH_REMATCH[3]}"
+        distance="${BASH_REMATCH[5]}"
+
+        poi_name="Coordinate search"
+
+        echo "POI search by coordinates: $latitude, $longitude"
+
+        # Coordinates must be within valid geographic ranges.
+        if ! awk -v lat="$latitude" -v lon="$longitude" \
+            'BEGIN { exit !(lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180) }'; then
+
+            echo "Error: Invalid coordinates."
+            jq -n '{error: "Latitude must be between -90 and 90 and longitude between -180 and 180."}' > "$POI_RESPONSE_FILE"
+            return 1
+        fi
+
+        where_clause="poiname IS NOT NULL"
+
+    else
+
+        echo "Error: Invalid POI request format."
+        jq -n '{error: "Invalid POI request format."}' > "$POI_RESPONSE_FILE"
+        return 1
+
+    fi
+
+    # Validate that the requested distance is positive.
+    if ! awk -v distance="$distance" \
+        'BEGIN { exit !(distance > 0) }'; then
+
+        echo "Error: Invalid search distance."
+        jq -n '{error: "Search distance must be greater than zero."}' > "$POI_RESPONSE_FILE"
+        return 1
+    fi
+
+    # Construct the geographic point used by the spatial query.
+    geometry=$(printf \
+        '{"x":%s,"y":%s,"spatialReference":{"wkid":4283}}' \
+        "$longitude" "$latitude")
+
+    echo "Searching within ${distance} metres..."
+
+    # Retrieve neighbouring POIs from the NSW API.
+    if ! curl -fsSG "$POI_URL" \
+        --data-urlencode "where=$where_clause" \
+        --data-urlencode "geometry=$geometry" \
+        --data-urlencode "geometryType=esriGeometryPoint" \
+        --data-urlencode "inSR=4283" \
+        --data-urlencode "spatialRel=esriSpatialRelIntersects" \
+        --data-urlencode "distance=$distance" \
+        --data-urlencode "units=esriSRUnit_Meter" \
+        --data-urlencode "outFields=poiname" \
+        --data-urlencode "returnGeometry=false" \
+        --data-urlencode "f=json" \
+        -o "$POI_RESULTS_FILE"; then
+
+        echo "Error: Failed to retrieve neighbouring POIs."
+        jq -n '{error: "Failed to retrieve neighbouring POIs."}' > "$POI_RESPONSE_FILE"
+        return 1
+    fi
+
+    # Validate the spatial query response.
+    if ! jq -e 'has("error") == false and (.features | type == "array")' \
+        "$POI_RESULTS_FILE" >/dev/null 2>&1; then
+
+        echo "Error: Invalid response from POI API."
+        jq -n '{error: "Invalid response from POI API."}' > "$POI_RESPONSE_FILE"
+        return 1
+    fi
+
+    # Generate the final JSON response.
+    if ! jq \
+        --arg poi "$poi_name" \
+        --argjson latitude "$latitude" \
+        --argjson longitude "$longitude" \
+        --argjson distance "$distance" \
+        '{
+            poi: $poi,
+            coordinates: {
+                latitude: $latitude,
+                longitude: $longitude
+            },
+            distance: $distance,
+            neighbours: (
+                [
+                    .features[]?.attributes.poiname
+                    | select(type == "string" and length > 0 and . != $poi)
+                ]
+                | unique
+            )
+        }' "$POI_RESULTS_FILE" > "$POI_RESPONSE_FILE"; then
+
+        echo "Error: Failed to generate POI JSON response."
+        jq -n '{error: "Failed to generate POI JSON response."}' > "$POI_RESPONSE_FILE"
+        return 1
+    fi
+
+    echo "POI search completed successfully."
+    echo "Found $(jq '.neighbours | length' "$POI_RESPONSE_FILE") neighbouring POIs."
+
+    return 0
+}
 
 echo "The server is running at $IP, port=$PORT"
 
@@ -498,8 +846,32 @@ while true; do
             fi
         fi
 
-        # Close the server's input descriptor.
-        exec {NC_IN}>&-
+       # Close the server's input descriptor.
+       exec {NC_IN}>&-
+
+   elif [[ "$request" == poi\ * ]]; then
+
+       echo "Received POI request: $request"
+
+       # Process the request and generate the JSON response.
+       process_poi_request "$request" || true
+
+       # Send the JSON response to the client.
+       if [ -s "$POI_RESPONSE_FILE" ]; then
+
+           if cat "$POI_RESPONSE_FILE" >&"$NC_IN"; then
+               echo "POI JSON response sent successfully."
+           else
+               echo "Error: Failed to send POI JSON response."
+           fi
+
+       else
+           echo "Error: POI response file was not created."
+           printf '{"error":"Failed to create POI response."}\n' >&"$NC_IN"
+       fi
+
+       # Close the server's input descriptor.
+       exec {NC_IN}>&-
 
     elif [ -z "$request" ]; then
 
