@@ -1,6 +1,6 @@
 #!/bin/bash
 
-SERVER_IP="localhost"
+SERVER_IP="127.0.0.1"
 SERVER_PORT="1234"
 
 OUTPUT_FILE="poi.json"

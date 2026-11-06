@@ -1,6 +1,6 @@
 #!/bin/bash
 
-SERVER_IP="localhost"
+SERVER_IP="127.0.0.1"
 SERVER_PORT="1234"
 RESPONSE_FILE="/tmp/population_response"
 OUTPUT_FILE="population.png"
@@ -14,8 +14,8 @@ echo "Connecting to $SERVER_IP:$SERVER_PORT..."
 echo "Request: population"
 
 # Send request and save the response as a file.
-if ! (printf 'population\n'; sleep 5) |
-     nc -w 30 "$SERVER_IP" "$SERVER_PORT" > "$RESPONSE_FILE"; then
+if ! printf 'population\n' |
+    nc -w 30 "$SERVER_IP" "$SERVER_PORT" > "$RESPONSE_FILE"; then
 
     echo "ERROR: Netcat connection failed."
     exit 1

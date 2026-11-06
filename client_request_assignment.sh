@@ -1,11 +1,11 @@
 #!/bin/bash
 #test
-SERVER_IP="LocalHost"
+SERVER_IP="127.0.0.1"
 SERVER_PORT="1234"
 
 echo "Connecting to $SERVER_IP:$SERVER_PORT..."
 
-(printf 'assignment\n'; sleep 5) | nc localhost 1234 > assignment.json
+printf 'assignment\n' | nc -w 30 "$SERVER_IP" "$SERVER_PORT" > assignment.json
 
 NC_STATUS=$?
 
