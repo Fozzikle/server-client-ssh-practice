@@ -1,0 +1,89 @@
+commit bf0c66e87c7f046e5267a705a40e02869a005155
+Author: mathis <mathis.limpkin@gmail.com>
+Date:   Fri Nov 6 16:04:05 2026 +1100
+
+    All is working and passes required test cases. server_test.sh is the final working one however uses socat instead of nc so leaving in server.sh though it fails testcase b
+
+commit ebd6b7423bc20baae3074ade26cd87dd57ba42e0
+Author: mathis <mathis.limpkin@gmail.com>
+Date:   Fri Nov 6 00:18:46 2026 +1100
+
+    Working! Completed upto and including poi
+
+commit 4468f26ca0201a756abb371ed5e7b282ef41884a
+Author: mathis <mathis.limpkin@gmail.com>
+Date:   Thu Nov 5 22:34:23 2026 +1100
+
+    Working! Completed upto and including population graph
+
+commit 2f9dca7e7601a83b616c27fa12ff6dde23cf9a6c
+Author: mathis <mathis.limpkin@gmail.com>
+Date:   Thu Nov 5 16:53:02 2026 +1100
+
+    Working! Completed upto rubric: assignment.json
+
+commit f9de4459ec95de97ff08be909f4b0385addde534
+Author: mathis <mathis.limpkin@gmail.com>
+Date:   Wed Nov 4 20:40:35 2026 +1100
+
+    somehow working
+
+commit b8dd2caf429e0780b471b2523843c9f8895c45ba
+Author: mathis <mathis.limpkin@gmail.com>
+Date:   Wed Nov 4 20:35:16 2026 +1100
+
+    somehow working
+
+commit d812e4d5c543ad914421a931f7e0d0d70fdd8527
+Author: mathis <mathis.limpkin@gmail.com>
+Date:   Wed Nov 4 16:00:58 2026 +1100
+
+    Incomplete: Sometimes works but not sure why not always
+
+commit e6b0299a47591ab5c7ac01c3aa85ba8970acb49e
+Author: mathis <mathis.limpkin@gmail.com>
+Date:   Wed Nov 4 15:39:06 2026 +1100
+
+    Incomplete assignment automation + try debug git bug (new)
+
+commit bf6754cbe85d57f424a2feb47f07483d28600f7c
+Author: mathis <mathis.limpkin@gmail.com>
+Date:   Wed Nov 4 12:43:08 2026 +1100
+
+    completed: assingment print and json file creation. Todo: optmisation and cleaning of debugging comments and additional comments used during creation
+
+commit 82a756bcbc68f640f249c26c1e6dcb4d4962718c
+Author: mathis <mathis.limpkin@gmail.com>
+Date:   Wed Nov 4 12:09:34 2026 +1100
+
+    completed: assingment print and json file creation. Todo: optmisation and cleaning of debugging comments and additional comments used during creation
+
+commit 872e79aa6611f7f4e3ab3451202d16bdc206d736
+Author: mathis <mathis.limpkin@gmail.com>
+Date:   Wed Nov 4 00:55:47 2026 +1100
+
+    completed printing assignment page (may need to change as it doesn't enable output + continuous listening)
+
+commit 023f29962f4d876f5f595b90c1fd854e7a8dfef1
+Author: mathis <mathis.limpkin@gmail.com>
+Date:   Wed Nov 4 00:04:39 2026 +1100
+
+    added connection check
+
+commit c49ecfa95ff78331598e85f3f42741abe3f1b597
+Author: mathis <mathis.limpkin@gmail.com>
+Date:   Tue Nov 3 22:51:44 2026 +1100
+
+    Created announcement
+
+commit f1edaff2646ca551ef813c0dfdac587b32155dd5
+Author: mathis <mathis.limpkin@gmail.com>
+Date:   Tue Nov 3 22:50:26 2026 +1100
+
+    implemented get_port function, tested and working
+
+commit 97fc4eff1f4f74b050f53ff36b07b561a47a826f
+Author: mathis <mathis.limpkin@gmail.com>
+Date:   Tue Nov 3 22:18:27 2026 +1100
+
+    implemented get_ip function, tested and working
