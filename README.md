@@ -1,13 +1,3 @@
-## Note about NC
-The assignment was coded in JetBrains Idea so there are some remnants of that in this submission.
-The submission package includes working server code (server_test.sh) that can complete all parts of
-this assignment. The file server.sh was my original implementation, however some challenges where found
-with nc when making this in a Windows environment. server_test.sh hence utilises socat instead to other come 
-these challenges. Further, server.sh utilise coprocess in nc so it inherently fails test case b as it adds new 
-requests to the back of the tcp queue instead of erroring out further calling for the use of socat. Last note
-about nc was the need to add force delay in client requests to keep the nc channel open long enough to parse the 
-expected information back to the client hence the original create of the client files found in this submission.
-
 ## What is provided 
 In this package:
 - the server code (server_test.sh)
@@ -24,6 +14,12 @@ solution came from nc struggling to find the port in use (especially after you k
 From this get_port() will default to port 1234 by allow you to change it. It will also check that the intended port is not in use before allocation
 hence if in use will choose a different port. 
 
+There are 3 main functions of this 'server':
+1. Get key assignment information of info1112 assignment 2 (as of semester 2 2026 and may need to update link beyond this timeframe)
+2. Get population: which pulls population data of NSW including creating a png of population trends.
+3. Get POI: can parse location name or coordinates and will use the NSW POI api to get all neighbouring POI's of a specified distance. 
+
+## How to run 
 Ideal workflow for usage is <br>
 setting up the container: <br>
 ``docker run -it --name server -p 1234:1234 alpine sh`` <br>
